@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import sys
+
+# Ensure non-ASCII output (e.g. the "<=" symbol in metric notes) prints on
+# Windows consoles that default to cp1252.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 from app.evaluate import evaluate_on_samples, save_experiment_run
 from app.graph import simplify_with_refinement
