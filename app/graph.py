@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
 from typing import Literal
 
-from langchain_openai import ChatOpenAI
+from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph import END, START, StateGraph
 
 from app.agents import run_analyzer, run_quality_gate, run_simplifier
+from app.llm_factory import get_default_model, get_simplifier_model
 from app.metrics import build_metric_snapshot
 from app.models import (
     AnalyzerInput,
@@ -15,16 +17,20 @@ from app.models import (
 )
 
 
-def make_default_model(model_name: str = "gpt-4o-mini", temperature: float = 0.1) -> ChatOpenAI:
-    return ChatOpenAI(model=model_name, temperature=temperature)
+def make_default_model(model_name: str = "gpt-4o-mini", temperature: float = 0.1) -> BaseChatModel:
+    return get_default_model(model_name=model_name, temperature=temperature)
 
 
-def _analyze_node(state: GraphState, model: ChatOpenAI) -> dict:
+def _using_ollama_simplifier() -> bool:
+    return os.getenv("USE_OLLAMA_SIMPLIFIER", "").strip() in {"1", "true", "True"}
+
+
+def _analyze_node(state: GraphState, model: BaseChatModel) -> dict:
     result = run_analyzer(model, AnalyzerInput(source_text=state.source_text))
     return {"analysis": result}
 
 
-def _simplifier_node(state: GraphState, model: ChatOpenAI) -> dict:
+def _simplifier_node(state: GraphState, model: BaseChatModel) -> dict:
     revision_notes = state.quality_feedback.revision_notes if state.quality_feedback else None
     result = run_simplifier(
         model,
@@ -33,11 +39,13 @@ def _simplifier_node(state: GraphState, model: ChatOpenAI) -> dict:
             analysis=state.analysis,
             revision_notes=revision_notes,
         ),
+        # A fine-tuned Ollama model emits plain text, not structured JSON.
+        use_structured_output=not _using_ollama_simplifier(),
     )
     return {"simplification": result.simplified_text, "iteration": state.iteration + 1}
 
 
-def _quality_gate_node(state: GraphState, model: ChatOpenAI) -> dict:
+def _quality_gate_node(state: GraphState, model: BaseChatModel) -> dict:
     snapshot = build_metric_snapshot(
         state.source_text,
         state.simplification,
@@ -64,12 +72,15 @@ def _route_after_quality_gate(state: GraphState) -> Literal["simplifier", END]:
     return "simplifier"
 
 
-def build_graph(model: ChatOpenAI | None = None):
+def build_graph(model: BaseChatModel | None = None):
     chat_model = model or make_default_model()
+    # The simplifier may use a fine-tuned local model (Ollama) when enabled;
+    # the analyzer and quality gate keep the reliable structured-output model.
+    simplifier_model = get_simplifier_model()
     graph = StateGraph(GraphState)
 
     graph.add_node("analyze", lambda s: _analyze_node(s, chat_model))
-    graph.add_node("simplifier", lambda s: _simplifier_node(s, chat_model))
+    graph.add_node("simplifier", lambda s: _simplifier_node(s, simplifier_model))
     graph.add_node("quality_gate", lambda s: _quality_gate_node(s, chat_model))
 
     graph.add_edge(START, "analyze")

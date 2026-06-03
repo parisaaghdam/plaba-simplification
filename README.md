@@ -6,6 +6,8 @@ Minimal multi-agent medical text simplification with iterative refinement:
 - `quality_gate` agent merges faithfulness, plain-language checklist, readability metrics (FKGL, Flesch ease), automatic plain-language heuristics (sentence length, acronyms, passive voice), and optional SARI to accept or request revision.
 - LangGraph loops `simplifier` → `quality_gate` until accepted or `max_iterations` reached.
 
+The `simplifier` can use a model fine-tuned on PLABA (e.g. Mistral-7B via Ollama). See [`training/README.md`](training/README.md) for the data prep, QLoRA training, and integration steps.
+
 ## Dataset Downloaded
 
 Files are in `data/plaba`:

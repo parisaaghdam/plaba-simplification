@@ -70,7 +70,17 @@ def run_analyzer(model: BaseChatModel, payload: AnalyzerInput) -> AnalysisOutput
     return AnalysisOutput.model_validate(result)
 
 
-def run_simplifier(model: BaseChatModel, payload: SimplifierInput) -> SimplifierOutput:
+def run_simplifier(
+    model: BaseChatModel,
+    payload: SimplifierInput,
+    *,
+    use_structured_output: bool = True,
+) -> SimplifierOutput:
+    """Generate a plain-language rewrite of the source text.
+
+    Set ``use_structured_output=False`` for a fine-tuned local model (e.g. served
+    via Ollama) that emits plain text directly instead of a JSON object.
+    """
     prompt = (
         "You are a medical text simplifier writing for a general (lay) audience.\n"
         "Rewrite the source into plain language while preserving all medical meaning.\n\n"
@@ -94,13 +104,18 @@ def run_simplifier(model: BaseChatModel, payload: SimplifierInput) -> Simplifier
     if payload.revision_notes:
         prompt += f"\nQuality gate revision notes you must address:\n{payload.revision_notes}\n"
 
+    messages = [
+        SystemMessage(content=prompt),
+        HumanMessage(content=f"Source text:\n{payload.source_text}"),
+    ]
+
+    if not use_structured_output:
+        response = model.invoke(messages)
+        text = getattr(response, "content", response)
+        return SimplifierOutput(simplified_text=str(text).strip())
+
     structured = model.with_structured_output(SimplifierOutput)
-    result = structured.invoke(
-        [
-            SystemMessage(content=prompt),
-            HumanMessage(content=f"Source text:\n{payload.source_text}"),
-        ]
-    )
+    result = structured.invoke(messages)
     return SimplifierOutput.model_validate(result)
 
 
