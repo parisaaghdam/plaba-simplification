@@ -7,6 +7,14 @@ import textstat
 from app.models import ReadabilityScores, SimplificationMetrics
 from app.plain_language import compute_plain_language_metrics, plain_language_passes
 
+# Readability thresholds calibrated to the PLABA gold adaptations on val.csv
+# (FK grade: median 12.4, p75 13.97; Flesch ease: median 42, p25 33.6).
+# Targets are set so that output at least as readable as the harder human
+# references is accepted, rather than an unrealistic grade-8/9 target that the
+# gold simplifications themselves do not meet.
+MAX_FK_GRADE = 14.0
+MIN_FLESCH_EASE = 33.0
+
 
 def compute_readability_scores(text: str) -> ReadabilityScores:
     return ReadabilityScores(
@@ -39,8 +47,8 @@ def compute_sari(
 def readability_passes(
     scores: ReadabilityScores,
     *,
-    max_fk_grade: float = 9.0,
-    min_flesch_ease: float = 60.0,
+    max_fk_grade: float = MAX_FK_GRADE,
+    min_flesch_ease: float = MIN_FLESCH_EASE,
 ) -> bool:
     return scores.flesch_kincaid_grade <= max_fk_grade and scores.flesch_reading_ease >= min_flesch_ease
 

@@ -19,11 +19,11 @@ class QualityGateMetricTests(unittest.TestCase):
 
     def test_readability_fails_high_grade(self) -> None:
         scores = ReadabilityScores(
-            flesch_kincaid_grade=14.0,
-            flesch_reading_ease=65.0,
-            smog_index=9.0,
-            gunning_fog=10.0,
-            avg_sentence_length=14.0,
+            flesch_kincaid_grade=18.0,
+            flesch_reading_ease=20.0,
+            smog_index=15.0,
+            gunning_fog=18.0,
+            avg_sentence_length=28.0,
         )
         self.assertFalse(readability_passes(scores))
 

@@ -6,6 +6,8 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.metrics import (
+    MAX_FK_GRADE,
+    MIN_FLESCH_EASE,
     build_metric_snapshot,
     compute_readability_scores,
     readability_passes,
@@ -130,7 +132,8 @@ def _merge_metric_and_llm_verdict(
         notes = (
             notes
             + f"\nReadability metrics: FK grade {readability.flesch_kincaid_grade:.1f} "
-            f"(target ≤9), Flesch ease {readability.flesch_reading_ease:.1f} (target ≥60)."
+            f"(target <={MAX_FK_GRADE:.0f}), Flesch ease {readability.flesch_reading_ease:.1f} "
+            f"(target >={MIN_FLESCH_EASE:.0f})."
         ).strip()
     if not metrics_plain_language_ok and plain_failures:
         notes = (notes + "\nPlain-language metrics: " + "; ".join(plain_failures)).strip()

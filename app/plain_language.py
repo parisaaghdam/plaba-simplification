@@ -67,6 +67,14 @@ _DOUBLE_NEGATIVE_RE = re.compile(
 _ACRONYM_RE = re.compile(r"\b[A-Z]{2,}\b")
 _PAREN_EXPANSION_RE = re.compile(r"\(([A-Za-z][\w\s\-]{2,})\)")
 
+# Acronyms a lay reader is generally expected to know; not flagged as "undefined".
+SAFE_ACRONYMS: frozenset[str] = frozenset(
+    {
+        "DNA", "RNA", "HIV", "AIDS", "COVID", "SARS", "US", "USA", "UK", "EU",
+        "TV", "CT", "MRI", "ER", "ICU", "REM", "ID", "PH", "BMI", "IQ",
+    }
+)
+
 
 def _sentences(text: str) -> list[str]:
     parts = re.split(r"(?<=[.!?])\s+", text.strip())
@@ -85,6 +93,8 @@ def _undefined_acronyms(text: str) -> list[str]:
     undefined: list[str] = []
     for match in _ACRONYM_RE.finditer(text):
         acr = match.group()
+        if acr in SAFE_ACRONYMS:
+            continue
         start = max(0, match.start() - 80)
         window = text[start : match.end() + 80]
         if _PAREN_EXPANSION_RE.search(window):
@@ -120,13 +130,19 @@ def compute_plain_language_metrics(text: str) -> dict[str, Any]:
 def plain_language_passes(
     metrics: dict[str, Any],
     *,
-    max_avg_sentence_length: float = 20.0,
-    max_sentence_length: int = 30,
-    max_long_sentences: int = 2,
-    max_passive_hits: int = 3,
-    max_double_negatives: int = 0,
-    max_undefined_acronyms: int = 0,
+    max_avg_sentence_length: float = 25.0,
+    max_sentence_length: int = 50,
+    max_long_sentences: int = 8,
+    max_passive_hits: int = 6,
+    max_double_negatives: int = 1,
+    max_undefined_acronyms: int = 3,
 ) -> tuple[bool, list[str]]:
+    # Thresholds calibrated to the PLABA gold adaptations on val.csv (set near
+    # their p90) so output of human-quality plainness passes, while still
+    # catching genuinely dense or jargon-heavy rewrites. Gold reference stats:
+    # avg sentence length median 19.8/p90 28.6; longest median 34/p90 54;
+    # long sentences median 5/p90 8; passive median 2/p90 6; undefined
+    # acronyms median 1/p90 2.
     failures: list[str] = []
     if metrics["avg_sentence_length"] > max_avg_sentence_length:
         failures.append(
