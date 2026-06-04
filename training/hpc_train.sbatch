@@ -53,7 +53,6 @@ fi
 # Replace this with a real workspace path, e.g. created via:
 #   ws_allocate -F horse plaba 30
 export HF_HOME="${HF_HOME:-$REPO_DIR/.hf-cache}"
-export HF_HUB_ENABLE_HF_TRANSFER=1
 mkdir -p "$HF_HOME"
 
 # Only needed for GATED models (Mistral/Llama). Qwen is open and needs no token.
