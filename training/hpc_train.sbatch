@@ -14,7 +14,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=6   # Alpha allows at most 6 CPU cores per requested GPU
 #SBATCH --mem=64G
 #SBATCH --time=04:00:00
 #SBATCH --output=logs/%x-%j.out
