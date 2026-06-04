@@ -1,10 +1,11 @@
-# Install on a CUDA GPU machine (or Google Colab) for fine-tuning.
+# Install on a CUDA GPU machine (Colab / HPC) for fine-tuning.
 # These are NOT needed to run the LangGraph app itself.
-torch>=2.3.0
-transformers>=4.46.0
-datasets>=3.0.0
-trl>=0.12.0
-peft>=0.13.0
-accelerate>=1.0.0
-bitsandbytes>=0.44.0
+# Versions are pinned to a known-good, mutually compatible set.
+torch>=2.4.0
+transformers==4.55.2
+datasets==3.6.0
+trl==0.21.0
+peft==0.15.2
+accelerate==1.8.1
+bitsandbytes==0.46.1
 sentencepiece>=0.2.0

@@ -82,7 +82,7 @@ def main() -> None:
         args.base_model,
         quantization_config=bnb_config,
         device_map="auto",
-        dtype=compute_dtype,
+        torch_dtype=compute_dtype,
     )
     model.config.use_cache = False
 
