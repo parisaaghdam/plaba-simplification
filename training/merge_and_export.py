@@ -40,13 +40,29 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+# ChatML template (Qwen/Mistral-instruct style) so Ollama applies the system
+# instruction and chat turns the model was fine-tuned on. Without this, Ollama
+# feeds the prompt raw and the model just *continues* the text instead of
+# simplifying it.
+CHATML_TEMPLATE = (
+    "{{ if .System }}<|im_start|>system\n"
+    "{{ .System }}<|im_end|>\n"
+    "{{ end }}{{ if .Prompt }}<|im_start|>user\n"
+    "{{ .Prompt }}<|im_end|>\n"
+    "{{ end }}<|im_start|>assistant\n"
+    "{{ .Response }}<|im_end|>\n"
+)
+
+
 def write_modelfile(merged_dir: Path, gguf_name: str) -> None:
     modelfile = merged_dir / "Modelfile"
     content = (
         f"FROM ./{gguf_name}\n\n"
+        f'TEMPLATE """{CHATML_TEMPLATE}"""\n\n'
         f'SYSTEM """{SYSTEM_PROMPT}"""\n\n'
         "PARAMETER temperature 0.3\n"
         "PARAMETER top_p 0.9\n"
+        'PARAMETER stop "<|im_end|>"\n'
     )
     modelfile.write_text(content, encoding="utf-8")
     print(f"Wrote Ollama Modelfile -> {modelfile}")
