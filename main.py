@@ -16,9 +16,11 @@ from app.plaba_data import load_sentence_level_samples
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--text", type=str, help="Single medical text to simplify")
-    parser.add_argument("--eval", action="store_true", help="Run random 20-sample evaluation")
+    parser.add_argument("--eval", action="store_true", help="Run a batch evaluation")
     parser.add_argument("--data", type=str, default="data/plaba/val.csv")
     parser.add_argument("--output-dir", type=str, default="outputs/experiments")
+    parser.add_argument("--k", type=int, default=20, help="Number of samples to evaluate (--eval)")
+    parser.add_argument("--seed", type=int, default=42, help="Sampling seed (--eval)")
     args = parser.parse_args()
 
     if args.text:
@@ -35,7 +37,7 @@ def main() -> None:
 
     if args.eval:
         samples = load_sentence_level_samples(args.data)
-        result = evaluate_on_samples(samples, k=20, seed=42)
+        result = evaluate_on_samples(samples, k=args.k, seed=args.seed)
         paths = save_experiment_run(
             metrics=result["metrics"],
             rows=result["rows"],

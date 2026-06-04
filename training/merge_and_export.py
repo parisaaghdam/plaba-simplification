@@ -62,6 +62,7 @@ def write_modelfile(merged_dir: Path, gguf_name: str) -> None:
         f'SYSTEM """{SYSTEM_PROMPT}"""\n\n'
         "PARAMETER temperature 0.3\n"
         "PARAMETER top_p 0.9\n"
+        "PARAMETER num_predict 512\n"
         'PARAMETER stop "<|im_end|>"\n'
     )
     modelfile.write_text(content, encoding="utf-8")
