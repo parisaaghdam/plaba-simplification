@@ -65,7 +65,7 @@ def main() -> None:
     print("Loading base model (full precision for clean merge)...")
     base = AutoModelForCausalLM.from_pretrained(
         args.base_model,
-        dtype=torch.float16,
+        torch_dtype=torch.float16,
         device_map="auto",
     )
     print("Applying LoRA adapter...")
