@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 # Ensure non-ASCII output (e.g. the "<=" symbol in metric notes) prints on
@@ -21,6 +22,12 @@ def main() -> None:
     parser.add_argument("--output-dir", type=str, default="outputs/experiments")
     parser.add_argument("--k", type=int, default=20, help="Number of samples to evaluate (--eval)")
     parser.add_argument("--seed", type=int, default=42, help="Sampling seed (--eval)")
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=4,
+        help="Max simplifier retries per sample (--eval)",
+    )
     args = parser.parse_args()
 
     if args.text:
@@ -36,8 +43,29 @@ def main() -> None:
         return
 
     if args.eval:
+        print("Loading dataset...", flush=True)
         samples = load_sentence_level_samples(args.data)
-        result = evaluate_on_samples(samples, k=args.k, seed=args.seed)
+        print(f"Loaded {len(samples)} sentence groups from {args.data}", flush=True)
+        if os.getenv("USE_HF_SIMPLIFIER", "").strip() in {"1", "true", "True"}:
+            print(
+                f"Using fine-tuned HF simplifier on GPU. Rough estimate: "
+                f"{max(5, args.k * 2)}-{args.k * 5} minutes for {args.k} samples.",
+                flush=True,
+            )
+        elif os.getenv("USE_OLLAMA_SIMPLIFIER", "").strip() in {"1", "true", "True"}:
+            est_min = args.k * 5
+            print(
+                f"Using local Ollama simplifier (CPU). Rough estimate: "
+                f"{est_min}-{args.k * 15} minutes for {args.k} samples.",
+                flush=True,
+            )
+        result = evaluate_on_samples(
+            samples,
+            k=args.k,
+            seed=args.seed,
+            max_iterations=args.max_iterations,
+            output_dir=args.output_dir,
+        )
         paths = save_experiment_run(
             metrics=result["metrics"],
             rows=result["rows"],

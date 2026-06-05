@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -25,12 +26,35 @@ def _using_ollama_simplifier() -> bool:
     return os.getenv("USE_OLLAMA_SIMPLIFIER", "").strip() in {"1", "true", "True"}
 
 
+def _using_hf_simplifier() -> bool:
+    return os.getenv("USE_HF_SIMPLIFIER", "").strip() in {"1", "true", "True"}
+
+
+def _using_local_simplifier() -> bool:
+    return _using_ollama_simplifier() or _using_hf_simplifier()
+
+
+def _eval_verbose() -> bool:
+    return os.getenv("EVAL_VERBOSE", "").strip() in {"1", "true", "True"}
+
+
+def _log_step(message: str) -> None:
+    if _eval_verbose():
+        print(f"    {message}", flush=True)
+
+
 def _analyze_node(state: GraphState, model: BaseChatModel) -> dict:
+    t0 = time.perf_counter()
+    _log_step("analyzer: starting...")
     result = run_analyzer(model, AnalyzerInput(source_text=state.source_text))
+    _log_step(f"analyzer: done ({time.perf_counter() - t0:.1f}s)")
     return {"analysis": result}
 
 
 def _simplifier_node(state: GraphState, model: BaseChatModel) -> dict:
+    t0 = time.perf_counter()
+    attempt = state.iteration + 1
+    _log_step(f"simplifier: starting (attempt {attempt})...")
     revision_notes = state.quality_feedback.revision_notes if state.quality_feedback else None
     result = run_simplifier(
         model,
@@ -39,13 +63,16 @@ def _simplifier_node(state: GraphState, model: BaseChatModel) -> dict:
             analysis=state.analysis,
             revision_notes=revision_notes,
         ),
-        # A fine-tuned Ollama model emits plain text, not structured JSON.
-        use_structured_output=not _using_ollama_simplifier(),
+        # Fine-tuned local models emit plain text, not structured JSON.
+        use_structured_output=not _using_local_simplifier(),
     )
+    _log_step(f"simplifier: done ({time.perf_counter() - t0:.1f}s)")
     return {"simplification": result.simplified_text, "iteration": state.iteration + 1}
 
 
 def _quality_gate_node(state: GraphState, model: BaseChatModel) -> dict:
+    t0 = time.perf_counter()
+    _log_step("quality_gate: starting...")
     snapshot = build_metric_snapshot(
         state.source_text,
         state.simplification,
@@ -61,6 +88,8 @@ def _quality_gate_node(state: GraphState, model: BaseChatModel) -> dict:
             metric_snapshot=snapshot,
         ),
     )
+    verdict = "accepted" if result.accepted else "needs revision"
+    _log_step(f"quality_gate: {verdict} ({time.perf_counter() - t0:.1f}s)")
     return {"quality_feedback": result, "accepted": result.accepted}
 
 
@@ -97,7 +126,11 @@ def simplify_with_refinement(
     references: list[str] | None = None,
     max_iterations: int = 4,
 ) -> GraphState:
+    if _eval_verbose():
+        print("  pipeline: building graph...", flush=True)
     app = build_graph()
+    if _eval_verbose():
+        print("  pipeline: running agents...", flush=True)
     final_state = app.invoke(
         GraphState(
             source_text=source_text,
