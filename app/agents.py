@@ -6,13 +6,10 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.metrics import (
-    MAX_FK_GRADE,
-    MIN_FLESCH_EASE,
     build_metric_snapshot,
     compute_readability_scores,
-    readability_passes,
-    sari_passes,
 )
+from app.quality_scoring import apply_weighted_acceptance
 from app.models import (
     AnalysisOutput,
     AnalyzerInput,
@@ -119,61 +116,6 @@ def run_simplifier(
     return SimplifierOutput.model_validate(result)
 
 
-def _merge_metric_and_llm_verdict(
-    llm: QualityGateOutput,
-    readability: ReadabilityScores,
-    sari: float | None,
-    plain_failures: list[str],
-    metrics_plain_language_ok: bool,
-) -> QualityGateOutput:
-    metrics_readability_ok = readability_passes(readability)
-    metrics_sari_ok = sari_passes(sari)
-    criteria_ok = all(c.passed for c in llm.plain_language_criteria) if llm.plain_language_criteria else True
-    accepted = (
-        llm.fidelity_ok
-        and llm.readability_ok
-        and llm.plain_language_ok
-        and criteria_ok
-        and llm.glossary_terms_preserved
-        and metrics_readability_ok
-        and metrics_plain_language_ok
-        and metrics_sari_ok
-        and not llm.missing_information
-        and not llm.unsupported_additions
-        and not llm.plain_language_violations
-    )
-    notes = llm.revision_notes.strip()
-    if not metrics_readability_ok:
-        notes = (
-            notes
-            + f"\nReadability metrics: FK grade {readability.flesch_kincaid_grade:.1f} "
-            f"(target <={MAX_FK_GRADE:.0f}), Flesch ease {readability.flesch_reading_ease:.1f} "
-            f"(target >={MIN_FLESCH_EASE:.0f})."
-        ).strip()
-    if not metrics_plain_language_ok and plain_failures:
-        notes = (notes + "\nPlain-language metrics: " + "; ".join(plain_failures)).strip()
-    if not metrics_sari_ok and sari is not None:
-        notes = (notes + f"\nSARI {sari:.1f} below threshold; align closer to reference style.").strip()
-
-    return QualityGateOutput(
-        fidelity_ok=llm.fidelity_ok,
-        missing_information=llm.missing_information,
-        unsupported_additions=llm.unsupported_additions,
-        glossary_terms_preserved=llm.glossary_terms_preserved,
-        plain_language_ok=llm.plain_language_ok,
-        plain_language_criteria=llm.plain_language_criteria,
-        plain_language_violations=llm.plain_language_violations,
-        readability_scores=readability,
-        readability_ok=llm.readability_ok,
-        metrics_readability_ok=metrics_readability_ok,
-        metrics_plain_language_ok=metrics_plain_language_ok,
-        metrics_sari_ok=metrics_sari_ok,
-        sari=sari,
-        revision_notes=notes,
-        accepted=accepted,
-    )
-
-
 def run_quality_gate(model: BaseChatModel, payload: QualityGateInput) -> QualityGateOutput:
     readability = compute_readability_scores(payload.simplified_text)
     snapshot = payload.metric_snapshot or build_metric_snapshot(
@@ -193,7 +135,9 @@ def run_quality_gate(model: BaseChatModel, payload: QualityGateInput) -> Quality
     )
 
     prompt = (
-        "You are a unified quality gate for biomedical text simplification.\n"
+        "You are a strict, independent quality gate for biomedical text simplification.\n"
+        "You are a stronger reviewer than the simplifier — catch omissions, hallucinations, "
+        "and plain-language failures the generator may have missed.\n"
         "Use automatic metrics AND your judgment. Evaluate medical fidelity AND plain-language quality.\n\n"
         "Plain-language criteria (assess each; populate plain_language_criteria with passed/note):\n"
         f"{CRITERIA_PROMPT_BLOCK}\n\n"
@@ -229,7 +173,7 @@ def run_quality_gate(model: BaseChatModel, payload: QualityGateInput) -> Quality
         llm.plain_language_violations = list(
             dict.fromkeys(llm.plain_language_violations + plain_failures)
         )
-    return _merge_metric_and_llm_verdict(
+    return apply_weighted_acceptance(
         llm, readability, sari, plain_failures, metrics_plain_ok
     )
 

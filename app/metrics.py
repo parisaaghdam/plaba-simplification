@@ -44,6 +44,28 @@ def compute_sari(
     return float(result["sari"])
 
 
+def compute_bertscore_f1(
+    prediction: str,
+    references: list[str],
+) -> float | None:
+    """Max BERTScore F1 against any human reference (standard multi-ref setup)."""
+    if not references:
+        return None
+    try:
+        import evaluate
+
+        bertscore = evaluate.load("bertscore")
+        result = bertscore.compute(
+            predictions=[prediction] * len(references),
+            references=references,
+            lang="en",
+            verbose=False,
+        )
+        return float(max(result["f1"]))
+    except Exception:
+        return None
+
+
 def readability_passes(
     scores: ReadabilityScores,
     *,
@@ -68,6 +90,7 @@ def build_metric_snapshot(
     sari = compute_sari(source, prediction, references or [])
     plain = compute_plain_language_metrics(prediction)
     plain_ok, plain_failures = plain_language_passes(plain)
+    bertscore_f1 = compute_bertscore_f1(prediction, references or [])
     return {
         "readability": readability.model_dump(),
         "readability_passed": readability_passes(readability),
@@ -76,6 +99,7 @@ def build_metric_snapshot(
         "plain_language_failures": plain_failures,
         "sari": sari,
         "sari_passed": sari_passes(sari),
+        "bertscore_f1": bertscore_f1,
     }
 
 

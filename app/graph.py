@@ -8,7 +8,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph import END, START, StateGraph
 
 from app.agents import run_analyzer, run_quality_gate, run_simplifier
-from app.llm_factory import get_default_model, get_simplifier_model
+from app.llm_factory import get_default_model, get_quality_gate_model, get_simplifier_model
 from app.metrics import build_metric_snapshot
 from app.models import (
     AnalyzerInput,
@@ -101,21 +101,33 @@ def _route_after_quality_gate(state: GraphState) -> Literal["simplifier", END]:
     return "simplifier"
 
 
-def build_graph(model: BaseChatModel | None = None):
+def build_graph(
+    model: BaseChatModel | None = None,
+    *,
+    skip_analyzer: bool = False,
+    single_pass: bool = False,
+):
     chat_model = model or make_default_model()
-    # The simplifier may use a fine-tuned local model (Ollama) when enabled;
-    # the analyzer and quality gate keep the reliable structured-output model.
     simplifier_model = get_simplifier_model()
+    quality_gate_model = get_quality_gate_model()
     graph = StateGraph(GraphState)
 
     graph.add_node("analyze", lambda s: _analyze_node(s, chat_model))
     graph.add_node("simplifier", lambda s: _simplifier_node(s, simplifier_model))
-    graph.add_node("quality_gate", lambda s: _quality_gate_node(s, chat_model))
+    graph.add_node("quality_gate", lambda s: _quality_gate_node(s, quality_gate_model))
 
-    graph.add_edge(START, "analyze")
-    graph.add_edge("analyze", "simplifier")
-    graph.add_edge("simplifier", "quality_gate")
-    graph.add_conditional_edges("quality_gate", _route_after_quality_gate, ["simplifier", END])
+    if single_pass:
+        graph.add_edge(START, "simplifier")
+        graph.add_edge("simplifier", END)
+    elif skip_analyzer:
+        graph.add_edge(START, "simplifier")
+        graph.add_edge("simplifier", "quality_gate")
+        graph.add_conditional_edges("quality_gate", _route_after_quality_gate, ["simplifier", END])
+    else:
+        graph.add_edge(START, "analyze")
+        graph.add_edge("analyze", "simplifier")
+        graph.add_edge("simplifier", "quality_gate")
+        graph.add_conditional_edges("quality_gate", _route_after_quality_gate, ["simplifier", END])
 
     return graph.compile()
 
@@ -125,10 +137,13 @@ def simplify_with_refinement(
     *,
     references: list[str] | None = None,
     max_iterations: int = 4,
+    skip_analyzer: bool = False,
+    single_pass: bool = False,
 ) -> GraphState:
     if _eval_verbose():
-        print("  pipeline: building graph...", flush=True)
-    app = build_graph()
+        mode = "single-pass" if single_pass else ("no-analyzer" if skip_analyzer else "full")
+        print(f"  pipeline: building graph ({mode})...", flush=True)
+    app = build_graph(skip_analyzer=skip_analyzer, single_pass=single_pass)
     if _eval_verbose():
         print("  pipeline: running agents...", flush=True)
     final_state = app.invoke(
@@ -136,6 +151,11 @@ def simplify_with_refinement(
             source_text=source_text,
             references=references or [],
             max_iterations=max_iterations,
+            skip_analyzer=skip_analyzer,
+            single_pass=single_pass,
         )
     )
-    return GraphState.model_validate(final_state)
+    state = GraphState.model_validate(final_state)
+    if single_pass:
+        state.accepted = True
+    return state

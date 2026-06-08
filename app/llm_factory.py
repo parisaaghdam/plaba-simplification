@@ -9,6 +9,7 @@ Environment variables:
     USE_OLLAMA_SIMPLIFIER=1            -> route the simplifier to Ollama (local PC)
     OLLAMA_SIMPLIFIER_MODEL=plaba-...  -> Ollama model name (default plaba-simplifier)
     OLLAMA_BASE_URL=http://...         -> optional custom Ollama host
+    QUALITY_GATE_MODEL=gpt-4o          -> stronger model for quality gate (default gpt-4o)
 """
 
 from __future__ import annotations
@@ -21,6 +22,14 @@ from langchain_core.language_models.chat_models import BaseChatModel
 def get_default_model(model_name: str = "gpt-4o-mini", temperature: float = 0.1) -> BaseChatModel:
     from langchain_openai import ChatOpenAI
 
+    return ChatOpenAI(model=model_name, temperature=temperature)
+
+
+def get_quality_gate_model(temperature: float = 0.0) -> BaseChatModel:
+    """Stronger / independent model for the quality gate (default GPT-4o)."""
+    from langchain_openai import ChatOpenAI
+
+    model_name = os.getenv("QUALITY_GATE_MODEL", "gpt-4o")
     return ChatOpenAI(model=model_name, temperature=temperature)
 
 

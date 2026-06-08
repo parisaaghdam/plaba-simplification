@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 
 # --- Analysis (complex words + concepts + glossary) ---
@@ -114,28 +114,11 @@ class QualityGateOutput(BaseModel):
     metrics_plain_language_ok: bool = True
     metrics_sari_ok: bool
     sari: float | None = None
+    quality_score: float = 0.0
+    acceptance_threshold: float = 70.0
+    score_breakdown: dict[str, float] = Field(default_factory=dict)
     revision_notes: str = ""
-    accepted: bool
-
-    @model_validator(mode="after")
-    def accepted_consistent(self) -> "QualityGateOutput":
-        criteria_ok = all(c.passed for c in self.plain_language_criteria) if self.plain_language_criteria else True
-        should_accept = (
-            self.fidelity_ok
-            and self.readability_ok
-            and self.plain_language_ok
-            and criteria_ok
-            and self.metrics_readability_ok
-            and self.metrics_plain_language_ok
-            and self.metrics_sari_ok
-            and self.glossary_terms_preserved
-            and not self.missing_information
-            and not self.unsupported_additions
-            and not self.plain_language_violations
-        )
-        if self.accepted != should_accept:
-            self.accepted = should_accept
-        return self
+    accepted: bool = False
 
 
 class GraphState(BaseModel):
@@ -147,6 +130,8 @@ class GraphState(BaseModel):
     accepted: bool = False
     iteration: int = 0
     max_iterations: int = 4
+    skip_analyzer: bool = False
+    single_pass: bool = False
 
 
 # Backward-compatible aliases for older code paths
