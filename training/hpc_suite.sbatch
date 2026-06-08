@@ -4,10 +4,14 @@
 # BEFORE submitting:
 #   export OPENAI_API_KEY="sk-..."
 #
-# Submit:
+# Submit (all 5 conditions):
 #   sbatch training/hpc_suite.sbatch
 #
-# Runs all conditions on the full test set (~148 examples each).
+# Resume remaining conditions (skip ones already done):
+#   export SUITE_CONDITIONS="single-finetuned,pipeline-mini,pipeline-finetuned,ablation-no-analyzer"
+#   sbatch training/hpc_suite.sbatch
+#
+# Runs all conditions on the full test set (~110 sentence groups).
 # Quality gate uses GPT-4o; simplifier uses fine-tuned HF model on GPU.
 
 #SBATCH --job-name=plaba-suite
@@ -62,11 +66,18 @@ export PYTHONUNBUFFERED=1
 nvidia-smi || true
 echo "Warming up SARI + BERTScore metric backends (one-time load)..."
 python -c "from app.metrics import warmup_metrics; warmup_metrics()"
+CONDITIONS_ARGS=()
+if [ -n "${SUITE_CONDITIONS:-}" ]; then
+    CONDITIONS_ARGS=(--conditions "$SUITE_CONDITIONS")
+    echo "Resuming subset: $SUITE_CONDITIONS"
+fi
+
 python main.py \
     --suite \
     --all \
     --data data/plaba/test.csv \
     --max-iterations 2 \
-    --output-dir outputs/experiments
+    --output-dir outputs/experiments \
+    "${CONDITIONS_ARGS[@]}"
 
 echo "Done. See outputs/experiments/suite-summary-*.json"
