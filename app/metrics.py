@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from functools import lru_cache
 from typing import Any
 
 import textstat
@@ -26,6 +28,31 @@ def compute_readability_scores(text: str) -> ReadabilityScores:
     )
 
 
+@lru_cache(maxsize=1)
+def _load_sari_metric():
+    import evaluate
+
+    return evaluate.load("sari")
+
+
+@lru_cache(maxsize=1)
+def _load_bertscore_metric():
+    import evaluate
+
+    return evaluate.load("bertscore")
+
+
+def bertscore_enabled() -> bool:
+    return os.getenv("SKIP_BERTSCORE", "").strip() not in {"1", "true", "True"}
+
+
+def warmup_metrics(*, bertscore: bool = True) -> None:
+    """Pre-load metric backends once (call at job start on HPC)."""
+    _load_sari_metric()
+    if bertscore and bertscore_enabled():
+        _load_bertscore_metric()
+
+
 def compute_sari(
     source: str,
     prediction: str,
@@ -33,10 +60,7 @@ def compute_sari(
 ) -> float | None:
     if not references:
         return None
-    import evaluate
-
-    sari_metric = evaluate.load("sari")
-    result = sari_metric.compute(
+    result = _load_sari_metric().compute(
         sources=[source],
         predictions=[prediction],
         references=[references],
@@ -49,20 +73,18 @@ def compute_bertscore_f1(
     references: list[str],
 ) -> float | None:
     """Max BERTScore F1 against any human reference (standard multi-ref setup)."""
-    if not references:
+    if not references or not bertscore_enabled():
         return None
     try:
-        import evaluate
-
-        bertscore = evaluate.load("bertscore")
-        result = bertscore.compute(
+        result = _load_bertscore_metric().compute(
             predictions=[prediction] * len(references),
             references=references,
             lang="en",
             verbose=False,
         )
         return float(max(result["f1"]))
-    except Exception:
+    except Exception as exc:
+        print(f"Warning: BERTScore failed ({exc}); skipping.", flush=True)
         return None
 
 

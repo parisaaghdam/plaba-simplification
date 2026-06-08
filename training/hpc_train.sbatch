@@ -31,9 +31,8 @@ mkdir -p logs outputs
 
 # --- 1) Python environment ---------------------------------------------------
 # Load a Python module (check available ones with: module spider Python).
-module purge
-module load release/24.04 || true
-module load Python/3.11.5 || module load Python || true
+module --force purge
+module load release/24.04 GCCcore/13.2.0 Python/3.11.5
 
 # Create the virtual environment once; reuse it on later runs.
 VENV="$REPO_DIR/.venv-train"

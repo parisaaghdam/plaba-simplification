@@ -31,13 +31,14 @@ if [ -z "${OPENAI_API_KEY:-}" ]; then
     exit 1
 fi
 
-module purge
-module load release/24.04 || true
-module load Python/3.11.5 || module load Python || true
+module --force purge
+module load release/24.04 GCCcore/13.2.0 Python/3.11.5
 
 VENV="$REPO_DIR/.venv-train"
 source "$VENV/bin/activate"
 pip install -q -r requirements.txt
+# SARI metric (evaluate-metric/sari) needs these; fail fast if still missing.
+python -c "import sacremoses, sacrebleu"
 
 export HF_HOME="${HF_HOME:-$REPO_DIR/.hf-cache}"
 export USE_HF_SIMPLIFIER=1
@@ -47,6 +48,8 @@ export EVAL_VERBOSE=1
 export PYTHONUNBUFFERED=1
 
 nvidia-smi || true
+echo "Warming up SARI + BERTScore metric backends (one-time load)..."
+python -c "from app.metrics import warmup_metrics; warmup_metrics()"
 python main.py \
     --suite \
     --all \

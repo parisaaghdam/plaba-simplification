@@ -60,6 +60,10 @@ def main() -> None:
     sample_k = 0 if args.all else args.k
 
     if args.suite:
+        from app.metrics import warmup_metrics
+
+        print("Warming up metric backends...", flush=True)
+        warmup_metrics()
         print("Loading dataset...", flush=True)
         samples = load_sentence_level_samples(args.data)
         print(f"Loaded {len(samples)} sentence groups from {args.data}", flush=True)

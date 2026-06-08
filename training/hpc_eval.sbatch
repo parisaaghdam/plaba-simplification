@@ -46,9 +46,8 @@ if [ -z "${OPENAI_API_KEY:-}" ]; then
 fi
 
 # --- Python environment (reuse training venv + install app deps) -------------
-module purge
-module load release/24.04 || true
-module load Python/3.11.5 || module load Python || true
+module --force purge
+module load release/24.04 GCCcore/13.2.0 Python/3.11.5
 
 VENV="$REPO_DIR/.venv-train"
 if [ ! -d "$VENV" ]; then
