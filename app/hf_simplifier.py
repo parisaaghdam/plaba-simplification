@@ -37,7 +37,10 @@ class HFSimplifierChatModel(BaseChatModel):
 
         if not torch.cuda.is_available():
             raise RuntimeError(
-                "USE_HF_SIMPLIFIER requires a CUDA GPU. Run this on an HPC GPU node."
+                "USE_HF_SIMPLIFIER requires a CUDA GPU. "
+                f"PyTorch {torch.__version__} sees cuda=False. "
+                "On HPC, reinstall CUDA PyTorch: "
+                "pip install torch --index-url https://download.pytorch.org/whl/cu121"
             )
 
         print(f"Loading HF simplifier from {self.model_path} ...", flush=True)

@@ -40,6 +40,18 @@ pip install -q -r requirements.txt
 # SARI metric (evaluate-metric/sari) needs these; fail fast if still missing.
 python -c "import sacremoses, sacrebleu"
 
+# Fine-tuned inference needs CUDA-enabled PyTorch (CPU-only wheels break on GPU nodes).
+if ! python -c "import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)"; then
+    echo "Installing CUDA PyTorch (cu121) — required for USE_HF_SIMPLIFIER..."
+    pip install -q torch --index-url https://download.pytorch.org/whl/cu121
+fi
+python -c "import torch; print('PyTorch', torch.__version__, '| CUDA available:', torch.cuda.is_available())"
+if ! python -c "import torch; assert torch.cuda.is_available()"; then
+    echo "ERROR: CUDA not visible to PyTorch on this GPU node."
+    nvidia-smi || true
+    exit 1
+fi
+
 export HF_HOME="${HF_HOME:-$REPO_DIR/.hf-cache}"
 export USE_HF_SIMPLIFIER=1
 export HF_SIMPLIFIER_PATH="${HF_SIMPLIFIER_PATH:-$REPO_DIR/outputs/plaba-merged}"

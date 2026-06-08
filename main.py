@@ -43,6 +43,12 @@ def main() -> None:
         default=2,
         help="Max simplifier retries per sample (--eval)",
     )
+    parser.add_argument(
+        "--conditions",
+        type=str,
+        default="",
+        help="Comma-separated subset for --suite (e.g. single-finetuned,pipeline-mini)",
+    )
     args = parser.parse_args()
 
     if args.text:
@@ -67,12 +73,18 @@ def main() -> None:
         print("Loading dataset...", flush=True)
         samples = load_sentence_level_samples(args.data)
         print(f"Loaded {len(samples)} sentence groups from {args.data}", flush=True)
+        condition_list = (
+            [c.strip() for c in args.conditions.split(",") if c.strip()]
+            if args.conditions
+            else None
+        )
         run_experiment_suite(
             samples,
             k=sample_k,
             seed=args.seed,
             max_iterations=args.max_iterations,
             output_dir=args.output_dir,
+            conditions=condition_list,
         )
         return
 
