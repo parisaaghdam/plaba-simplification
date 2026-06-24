@@ -16,10 +16,22 @@ from dataclasses import dataclass
 from typing import Iterator
 
 _SIMPLIFIER_ENV_KEYS = (
+    # Analyzer
+    "USE_OLLAMA_ANALYZER",
+    "OLLAMA_ANALYZER_MODEL",
+    "USE_HF_ANALYZER",
+    "HF_ANALYZER_PATH",
+    # Simplifier
     "USE_OLLAMA_SIMPLIFIER",
     "OLLAMA_SIMPLIFIER_MODEL",
     "USE_HF_SIMPLIFIER",
     "HF_SIMPLIFIER_PATH",
+    # Quality gate
+    "USE_OLLAMA_QUALITY_GATE",
+    "OLLAMA_QUALITY_GATE_MODEL",
+    "USE_HF_QUALITY_GATE",
+    "HF_QUALITY_GATE_PATH",
+    "QUALITY_GATE_MODEL",
 )
 
 
@@ -30,6 +42,7 @@ class ExperimentCondition:
     single_pass: bool
     skip_analyzer: bool
     simplifier: str  # "api" | "finetuned"
+    max_iterations: int | None = None  # overrides the global --max-iterations when set
 
 
 CONDITIONS: dict[str, ExperimentCondition] = {
@@ -68,6 +81,14 @@ CONDITIONS: dict[str, ExperimentCondition] = {
         skip_analyzer=True,
         simplifier="finetuned",
     ),
+    "ablation-single-iter": ExperimentCondition(
+        name="ablation-single-iter",
+        description="Full pipeline, fine-tuned simplifier, max 1 refinement iteration",
+        single_pass=False,
+        skip_analyzer=False,
+        simplifier="finetuned",
+        max_iterations=1,
+    ),
 }
 
 SUITE_ORDER = [
@@ -76,6 +97,7 @@ SUITE_ORDER = [
     "pipeline-mini",
     "pipeline-finetuned",
     "ablation-no-analyzer",
+    "ablation-single-iter",
 ]
 
 

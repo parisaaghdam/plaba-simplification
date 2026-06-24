@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import random
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,29 @@ from app.experiments import CONDITIONS, SUITE_ORDER, ExperimentCondition, experi
 from app.graph import simplify_with_refinement
 from app.metrics import compute_bertscore_f1, compute_readability_scores, compute_sari
 from app.plaba_data import pick_random_samples
+
+
+def bootstrap_ci(
+    scores: list[float],
+    n_boot: int = 1000,
+    confidence: float = 0.95,
+    seed: int = 0,
+) -> tuple[float, float] | None:
+    """Percentile bootstrap 95% CI for the mean.
+
+    Returns (lower, upper) rounded to 4 decimal places, or None if fewer than
+    2 observations are available (CI is undefined).
+    """
+    if len(scores) < 2:
+        return None
+    rng = random.Random(seed)
+    n = len(scores)
+    boot_means = sorted(mean(rng.choices(scores, k=n)) for _ in range(n_boot))
+    alpha = (1 - confidence) / 2
+    lo = boot_means[int(alpha * n_boot)]
+    hi = boot_means[min(int((1 - alpha) * n_boot), n_boot - 1)]
+    return round(lo, 4), round(hi, 4)
+
 
 _EVAL_FIELDNAMES = [
     "index",
@@ -52,7 +76,7 @@ def _append_partial_row(row: dict[str, Any], partial_csv: Path) -> None:
 
 def evaluate_on_samples(
     samples,
-    k: int = 20,
+    k: int = 0,
     seed: int = 42,
     *,
     condition: ExperimentCondition | None = None,
@@ -65,6 +89,9 @@ def evaluate_on_samples(
     cond_name = condition.name if condition else "default"
     single_pass = condition.single_pass if condition else False
     skip_analyzer = condition.skip_analyzer if condition else False
+    # Condition-level override (e.g. ablation-single-iter forces max_iterations=1)
+    if condition is not None and condition.max_iterations is not None:
+        max_iterations = condition.max_iterations
 
     if verbose:
         os.environ["EVAL_VERBOSE"] = "1"
@@ -166,31 +193,64 @@ def evaluate_on_samples(
         if partial_csv is not None:
             _append_partial_row(row, partial_csv)
 
+    # --- Automatic metrics (fully reproducible, model-independent) ---
     metrics: dict[str, Any] = {
         "condition": cond_name,
         "description": condition.description if condition else "default pipeline",
         "n_samples": len(chosen),
-        "avg_fk_grade": mean(readability_grades) if readability_grades else None,
-        "accepted_count": sum(accepted_flags),
-        "acceptance_rate": sum(accepted_flags) / len(chosen) if chosen else 0.0,
+        "seed": seed,
     }
     if sari_scores:
-        metrics["avg_sari"] = mean(sari_scores)
+        metrics["avg_sari"] = round(mean(sari_scores), 4)
+        ci = bootstrap_ci(sari_scores, seed=seed)
+        if ci:
+            metrics["avg_sari_ci95"] = list(ci)
     if bertscore_scores:
-        metrics["avg_bertscore_f1"] = mean(bertscore_scores)
+        metrics["avg_bertscore_f1"] = round(mean(bertscore_scores), 4)
+        ci = bootstrap_ci(bertscore_scores, seed=seed)
+        if ci:
+            metrics["avg_bertscore_f1_ci95"] = list(ci)
+    if readability_grades:
+        metrics["avg_fk_grade"] = round(mean(readability_grades), 4)
+        ci = bootstrap_ci(readability_grades, seed=seed)
+        if ci:
+            metrics["avg_fk_grade_ci95"] = list(ci)
+
+    # --- LLM-judge metrics (depend on the quality gate model — not independent) ---
+    # These are useful as pipeline-internal signals but should NOT be used as
+    # the primary comparison metric in publications, because the same LLM that
+    # runs the quality gate also influences the acceptance decision.
+    metrics["_llm_judge_note"] = (
+        "quality_score and acceptance_rate are produced by the quality gate LLM. "
+        "They are not independent of the pipeline. Use avg_sari / avg_bertscore_f1 "
+        "/ avg_fk_grade as primary reported metrics."
+    )
+    metrics["accepted_count"] = sum(accepted_flags)
+    metrics["acceptance_rate"] = round(sum(accepted_flags) / len(chosen), 4) if chosen else 0.0
     if quality_scores:
-        metrics["avg_quality_score"] = mean(quality_scores)
+        metrics["avg_quality_score"] = round(mean(quality_scores), 4)
 
     if verbose:
         print("\n--- Evaluation complete ---", flush=True)
-        print(f"  Condition: {cond_name}", flush=True)
-        print(f"  Accepted: {metrics['accepted_count']}/{total}", flush=True)
+        print(f"  Condition : {cond_name}", flush=True)
+        print(f"  n_samples : {total}", flush=True)
         if metrics.get("avg_sari") is not None:
-            print(f"  Avg SARI: {metrics['avg_sari']:.2f}", flush=True)
+            ci = metrics.get("avg_sari_ci95", [])
+            ci_str = f"  95% CI [{ci[0]:.2f}, {ci[1]:.2f}]" if ci else ""
+            print(f"  SARI      : {metrics['avg_sari']:.2f}{ci_str}", flush=True)
         if metrics.get("avg_bertscore_f1") is not None:
-            print(f"  Avg BERTScore F1: {metrics['avg_bertscore_f1']:.3f}", flush=True)
+            ci = metrics.get("avg_bertscore_f1_ci95", [])
+            ci_str = f"  95% CI [{ci[0]:.3f}, {ci[1]:.3f}]" if ci else ""
+            print(f"  BERTScore : {metrics['avg_bertscore_f1']:.3f}{ci_str}", flush=True)
         if metrics.get("avg_fk_grade") is not None:
-            print(f"  Avg FK grade: {metrics['avg_fk_grade']:.2f}", flush=True)
+            ci = metrics.get("avg_fk_grade_ci95", [])
+            ci_str = f"  95% CI [{ci[0]:.2f}, {ci[1]:.2f}]" if ci else ""
+            print(f"  FK grade  : {metrics['avg_fk_grade']:.2f}{ci_str}", flush=True)
+        print(
+            f"  Accepted  : {metrics['accepted_count']}/{total} "
+            f"(LLM-judge — not primary metric)",
+            flush=True,
+        )
 
     return {"metrics": metrics, "rows": rows}
 

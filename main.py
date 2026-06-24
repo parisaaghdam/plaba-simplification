@@ -34,7 +34,7 @@ def main() -> None:
     )
     parser.add_argument("--data", type=str, default="data/plaba/val.csv")
     parser.add_argument("--output-dir", type=str, default="outputs/experiments")
-    parser.add_argument("--k", type=int, default=20, help="Number of samples (--eval). Use 0 with --all.")
+    parser.add_argument("--k", type=int, default=0, help="Number of samples (--eval). 0 = full dataset (default).")
     parser.add_argument("--all", action="store_true", help="Evaluate full dataset (ignores --k)")
     parser.add_argument("--seed", type=int, default=42, help="Sampling seed (--eval)")
     parser.add_argument(

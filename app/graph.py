@@ -8,7 +8,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph import END, START, StateGraph
 
 from app.agents import run_analyzer, run_quality_gate, run_simplifier
-from app.llm_factory import get_default_model, get_quality_gate_model, get_simplifier_model
+from app.llm_factory import get_analyzer_model, get_default_model, get_quality_gate_model, get_simplifier_model
 from app.metrics import build_metric_snapshot
 from app.models import (
     AnalyzerInput,
@@ -107,7 +107,7 @@ def build_graph(
     skip_analyzer: bool = False,
     single_pass: bool = False,
 ):
-    chat_model = model or make_default_model()
+    chat_model = model or get_analyzer_model()
     simplifier_model = get_simplifier_model()
     quality_gate_model = get_quality_gate_model()
     graph = StateGraph(GraphState)

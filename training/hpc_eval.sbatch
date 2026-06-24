@@ -1,24 +1,30 @@
 #!/bin/bash
-# SLURM batch script: run batch evaluation on TU Dresden HPC (Alpha GPU).
+# SLURM batch script: batch evaluation on TU Dresden HPC (Alpha GPU).
 #
-# Uses your fine-tuned merged model on GPU (no Ollama needed).
-# Analyzer + quality gate still use OpenAI API (needs network + API key).
+# Fully open-source — no OpenAI API key required.
+#   Analyzer    : Qwen/Qwen2.5-7B-Instruct  (HF, GPU)
+#   Simplifier  : fine-tuned 7B model        (HF, GPU, outputs/plaba-merged)
+#   Quality gate: Qwen/Qwen2.5-7B-Instruct  (HF, GPU — shared weights with analyzer)
 #
-# BEFORE submitting, set your OpenAI key in the shell:
-#   export OPENAI_API_KEY="sk-..."
+# GPU memory budget on A100 40 GB (fp16):
+#   Qwen2.5-7B (analyzer + quality gate, cached): ~14 GB
+#   Fine-tuned simplifier:                        ~14 GB
+#   BERTScore + overhead:                         ~ 4 GB
+#   Total:                                        ~32 GB  ✓
 #
-# Submit from the repo root on login1.alpha:
+# PRE-REQUISITE: download Qwen2.5-7B-Instruct to HF cache before submitting:
+#   sbatch training/hpc_download.sbatch
+#
+# Submit from repo root on login1.alpha:
 #   sbatch training/hpc_eval.sbatch
 #
 # Watch progress:
 #   squeue --me
 #   tail -f logs/plaba-eval-<jobid>.out
-#   tail -f logs/plaba-eval-<jobid>.err
 #
 # Results:
 #   outputs/experiments/eval-<timestamp>.json
 #   outputs/experiments/eval-<timestamp>.csv
-#   outputs/experiments/eval-inprogress.csv  (updated after each sample)
 
 #SBATCH --job-name=plaba-eval
 #SBATCH --partition=alpha
@@ -26,8 +32,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=6
-#SBATCH --mem=48G
-#SBATCH --time=02:00:00
+#SBATCH --mem=80G
+#SBATCH --time=04:00:00
 #SBATCH --output=logs/%x-%j.out
 #SBATCH --error=logs/%x-%j.err
 # #SBATCH --account=p_your_project
@@ -37,46 +43,72 @@ set -euo pipefail
 REPO_DIR="$(pwd)"
 mkdir -p logs outputs/experiments
 
-# --- OpenAI key (required for analyzer + quality gate) -----------------------
-if [ -z "${OPENAI_API_KEY:-}" ]; then
-    echo "ERROR: Set OPENAI_API_KEY before sbatch:"
-    echo "  export OPENAI_API_KEY=\"sk-...\""
-    echo "  sbatch training/hpc_eval.sbatch"
-    exit 1
-fi
-
-# --- Python environment (reuse training venv + install app deps) -------------
+# --- Python environment ------------------------------------------------------
 module --force purge
 module load release/24.04 GCCcore/13.2.0 Python/3.11.5
 
 VENV="$REPO_DIR/.venv-train"
 if [ ! -d "$VENV" ]; then
-    echo "ERROR: .venv-train not found. Run training first (hpc_train.sbatch)."
+    echo "ERROR: .venv-train not found. Run: bash training/hpc_fix_venv.sh"
     exit 1
 fi
 source "$VENV/bin/activate"
 
-# App dependencies (langgraph, langchain-openai, etc.) — idempotent install.
 pip install -q -r requirements.txt
 
-export HF_HOME="${HF_HOME:-$REPO_DIR/.hf-cache}"
+# --- HF cache on scratch (avoid filling $HOME quota) -------------------------
+export HF_HOME="${HF_HOME:-/scratch/ws/$(whoami)-hf-cache}"
 mkdir -p "$HF_HOME"
 
-# --- Use fine-tuned model on GPU (merged weights from hpc_merge.sbatch) -------
-export USE_HF_SIMPLIFIER=1
-export HF_SIMPLIFIER_PATH="${HF_SIMPLIFIER_PATH:-$REPO_DIR/outputs/plaba-merged}"
-export EVAL_VERBOSE=1
-export PYTHONUNBUFFERED=1
+# --- CUDA check --------------------------------------------------------------
+ensure_cuda_torch() {
+    if python -c "import torch; assert torch.cuda.is_available()"; then
+        python -c "import torch; print('PyTorch', torch.__version__, '| CUDA:', torch.cuda.get_device_name(0))"
+        return 0
+    fi
+    echo "Replacing CPU PyTorch with CUDA build..."
+    pip uninstall -y torch torchvision torchaudio 2>/dev/null || true
+    for CU in cu124 cu121; do
+        pip install -q torch --index-url "https://download.pytorch.org/whl/$CU" || continue
+        if python -c "import torch; assert torch.cuda.is_available()"; then
+            python -c "import torch; print('PyTorch', torch.__version__, '| CUDA:', torch.cuda.get_device_name(0))"
+            return 0
+        fi
+        pip uninstall -y torch 2>/dev/null || true
+    done
+    return 1
+}
 
-if [ ! -f "$HF_SIMPLIFIER_PATH/config.json" ]; then
-    echo "ERROR: Merged model not found at $HF_SIMPLIFIER_PATH"
+if ! ensure_cuda_torch; then
+    echo "ERROR: CUDA not visible. Run: bash training/hpc_fix_venv.sh"
+    nvidia-smi || true
+    exit 1
+fi
+
+# --- Model paths -------------------------------------------------------------
+MERGED_MODEL="${HF_SIMPLIFIER_PATH:-$REPO_DIR/outputs/plaba-merged}"
+OPEN_MODEL="${HF_OPEN_MODEL:-Qwen/Qwen2.5-7B-Instruct}"
+
+if [ ! -f "$MERGED_MODEL/config.json" ]; then
+    echo "ERROR: Fine-tuned model not found at $MERGED_MODEL"
     echo "Run: sbatch training/hpc_merge.sbatch"
     exit 1
 fi
 
+# --- Fully open-source routing (no OpenAI) -----------------------------------
+export USE_HF_ANALYZER=1
+export HF_ANALYZER_PATH="$OPEN_MODEL"
+export USE_HF_SIMPLIFIER=1
+export HF_SIMPLIFIER_PATH="$MERGED_MODEL"
+export USE_HF_QUALITY_GATE=1
+export HF_QUALITY_GATE_PATH="$OPEN_MODEL"
+export EVAL_VERBOSE=1
+export PYTHONUNBUFFERED=1
+
 # --- Run evaluation ----------------------------------------------------------
 nvidia-smi || true
-echo "HF simplifier path: $HF_SIMPLIFIER_PATH"
+echo "Analyzer + quality gate : $OPEN_MODEL"
+echo "Simplifier              : $MERGED_MODEL"
 echo "Starting eval: k=20, seed=42, max_iterations=2"
 
 python main.py \

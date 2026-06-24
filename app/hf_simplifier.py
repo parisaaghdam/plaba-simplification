@@ -1,7 +1,13 @@
-"""GPU inference for the fine-tuned simplifier on HPC (no Ollama required).
+"""GPU inference wrapper for local HuggingFace models on HPC (no Ollama required).
 
-Loads the merged Hugging Face model once and reuses it for every sample.
-Enable with: USE_HF_SIMPLIFIER=1 and HF_SIMPLIFIER_PATH=outputs/plaba-merged
+Loads each model path once and caches the weights globally so multiple agents
+that share the same path (e.g. analyzer + quality gate both using Qwen2.5-7B)
+do not load the model twice and exhaust GPU VRAM.
+
+Memory budget on A100 40 GB (fp16):
+  - Qwen2.5-7B-Instruct  (analyzer + quality gate, shared): ~14 GB
+  - Fine-tuned 7B simplifier:                                ~14 GB
+  - Total:                                                   ~28 GB  ✓
 """
 
 from __future__ import annotations
@@ -13,6 +19,11 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from pydantic import PrivateAttr
+
+# Global cache: model_path -> (hf_model, tokenizer)
+# Allows multiple HFSimplifierChatModel instances with the same path to share
+# one set of loaded GPU weights.
+_MODEL_CACHE: dict[str, tuple[Any, Any]] = {}
 
 
 class HFSimplifierChatModel(BaseChatModel):
@@ -37,21 +48,27 @@ class HFSimplifierChatModel(BaseChatModel):
 
         if not torch.cuda.is_available():
             raise RuntimeError(
-                "USE_HF_SIMPLIFIER requires a CUDA GPU. "
+                "HF model routing requires a CUDA GPU. "
                 f"PyTorch {torch.__version__} sees cuda=False. "
                 "On HPC, reinstall CUDA PyTorch: "
                 "pip install torch --index-url https://download.pytorch.org/whl/cu121"
             )
 
-        print(f"Loading HF simplifier from {self.model_path} ...", flush=True)
-        self._tokenizer = AutoTokenizer.from_pretrained(self.model_path)
-        self._hf_model = AutoModelForCausalLM.from_pretrained(
+        if self.model_path in _MODEL_CACHE:
+            self._hf_model, self._tokenizer = _MODEL_CACHE[self.model_path]
+            return
+
+        print(f"Loading HF model from {self.model_path} ...", flush=True)
+        tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+        model = AutoModelForCausalLM.from_pretrained(
             self.model_path,
             torch_dtype=torch.float16,
             device_map="auto",
         )
-        self._hf_model.eval()
-        print("HF simplifier loaded on GPU.", flush=True)
+        model.eval()
+        _MODEL_CACHE[self.model_path] = (model, tokenizer)
+        self._hf_model, self._tokenizer = model, tokenizer
+        print(f"HF model loaded on GPU ({self.model_path}).", flush=True)
 
     @staticmethod
     def _to_chat(messages: list[BaseMessage]) -> list[dict[str, str]]:
@@ -115,8 +132,11 @@ class HFSimplifierChatModel(BaseChatModel):
         return self._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
 
 
-def get_hf_chat_model(temperature: float = 0.3) -> HFSimplifierChatModel:
-    path = os.getenv("HF_SIMPLIFIER_PATH", "outputs/plaba-merged")
+def get_hf_chat_model(
+    temperature: float = 0.3,
+    model_path: str | None = None,
+) -> HFSimplifierChatModel:
+    path = model_path or os.getenv("HF_SIMPLIFIER_PATH", "outputs/plaba-merged")
     max_tokens = int(os.getenv("HF_MAX_NEW_TOKENS", "512"))
     return HFSimplifierChatModel(
         model_path=path,
